@@ -894,7 +894,7 @@ pub struct Ucred {
 cfg_if::cfg_if! {
     if #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))] {
         pub type time_t = i64;
-        pub type suseconds_t = u64;
+        pub type suseconds_t = i64;
     } else {
         compile_error!("Unsupported architecture");
     }
@@ -1009,7 +1009,7 @@ impl TryFrom<TimeVal> for Duration {
     type Error = errno::Errno;
 
     fn try_from(value: TimeVal) -> Result<Self, Self::Error> {
-        let usec: u32 = value.tv_usec.trunc();
+        let usec = u32::try_from(value.tv_usec).map_err(|_| errno::Errno::EINVAL)?;
         if usec >= 1_000_000 {
             return Err(errno::Errno::EINVAL);
         }
@@ -3434,5 +3434,32 @@ impl<T> ReinterpretUsizeAsPtr<core::marker::PhantomData<(bool, T)>> for Option<U
         } else {
             Some(UserPtrMut::from_usize(v))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suseconds_t_is_signed() {
+        assert!(suseconds_t::MIN < 0);
+    }
+
+    #[test]
+    fn timeval_layout() {
+        assert_eq!(
+            core::mem::size_of::<TimeVal>(),
+            2 * core::mem::size_of::<usize>()
+        );
+    }
+
+    #[test]
+    fn timeval_negative_usec_is_invalid() {
+        let tv = TimeVal {
+            tv_sec: 0,
+            tv_usec: -1,
+        };
+        assert_eq!(Duration::try_from(tv), Err(errno::Errno::EINVAL));
     }
 }
